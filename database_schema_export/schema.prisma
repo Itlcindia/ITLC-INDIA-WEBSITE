@@ -1,0 +1,280 @@
+datasource db {
+  provider = "mysql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ----------------------------------------------------
+// Enums
+// ----------------------------------------------------
+enum UserRole {
+  SUPER_ADMIN
+  STAFF
+  STUDENT
+  CLIENT
+}
+
+enum CertificateStatus {
+  VERIFIED
+  REVOKED
+  EXPIRED
+}
+
+enum StudentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum JobStatus {
+  ACTIVE
+  CLOSED
+}
+
+enum ApplicationStatus {
+  NEW
+  REVIEWED
+  SHORTLISTED
+  REJECTED
+}
+
+enum InquiryStatus {
+  NEW
+  CONTACTED
+  CLOSED
+}
+
+// ----------------------------------------------------
+// 1. Users & Multi-Level RBAC
+// ----------------------------------------------------
+model User {
+  id           String        @id @default(cuid())
+  name         String
+  email        String        @unique
+  password     String
+  role         UserRole      @default(STAFF)
+  phone        String?
+  avatar       String?
+  status       String        @default("ACTIVE") // ACTIVE, SUSPENDED
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  staffProfile StaffProfile?
+
+  @@index([email])
+}
+
+model StaffProfile {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  department  String   // "Academics", "HR", "Marketing", "Management"
+  permissions String   @db.Text // JSON array of allowed modules, e.g. ["certificates", "students", "blogs"]
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ----------------------------------------------------
+// 2. Certificates (Verify Certificate Portal)
+// ----------------------------------------------------
+model Certificate {
+  id                 String            @id @default(cuid())
+  certificateNumber  String            @unique
+  studentName        String
+  courseName         String
+  startDate          String?
+  completionDate     String?
+  issueDate          String?
+  expiryDate         String?
+  dateOfBirth        String?           // For DOB security authentication before download
+  verificationId     String?
+  certificateFileUrl String?           @db.Text
+  status             CertificateStatus @default(VERIFIED)
+  revokedReason      String?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  @@index([certificateNumber])
+  @@index([studentName])
+}
+
+// ----------------------------------------------------
+// 3. Student Registrations (Admission Portal)
+// ----------------------------------------------------
+model StudentRegistration {
+  id                 String        @id @default(cuid())
+  applicationNumber  String        @unique
+  fullName           String
+  fatherName         String
+  email              String
+  mobileNumber       String
+  whatsappNumber     String?
+  dob                String
+  gender             String
+  collegeName        String
+  courseApplied      String
+  qualification      String
+  yearSemester       String
+  address            String        @db.Text
+  city               String
+  state              String
+  pincode            String
+  passportPhotoUrl   String?       @db.Text
+  resumeUrl          String?       @db.Text
+  aadhaarCardUrl     String?       @db.Text
+  collegeIdCardUrl   String?       @db.Text
+  status             StudentStatus @default(PENDING)
+  notes              String?       @db.Text
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  @@index([applicationNumber])
+  @@index([email])
+  @@index([mobileNumber])
+}
+
+// ----------------------------------------------------
+// 4. Products Suite (HRMS, CRM, SaaS Products)
+// ----------------------------------------------------
+model Product {
+  id                 String   @id @default(cuid())
+  name               String   // e.g. "ITLC HRMS", "ITLC AI CRM"
+  slug               String   @unique
+  category           String   // "Human Resources", "Sales & Marketing", "Enterprise ERP"
+  tagline            String
+  description        String   @db.Text
+  icon               String?  // Lucide icon name
+  features           String   @db.Text // JSON string of features [{title, description}]
+  directLoginUrl     String?  // Endpoint or internal modal trigger
+  externalWebsiteUrl String?  // e.g. https://hrms.itlcindia.com
+  demoUrl            String?
+  isLive             Boolean  @default(true)
+  sortOrder          Int      @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([slug])
+}
+
+// ----------------------------------------------------
+// 5. Careers & Job Applications
+// ----------------------------------------------------
+model Job {
+  id           String           @id @default(cuid())
+  title        String
+  department   String
+  location     String           // "Lucknow, Uttar Pradesh", "Remote"
+  type         String           // "Full-time", "Part-time", "Internship"
+  experience   String?
+  salary       String?
+  description  String           @db.Text
+  requirements String?          @db.Text
+  status       JobStatus        @default(ACTIVE)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  applications JobApplication[]
+}
+
+model JobApplication {
+  id         String            @id @default(cuid())
+  jobId      String
+  fullName   String
+  email      String
+  phone      String?
+  message    String?           @db.Text
+  resumeUrl  String            @db.Text
+  status     ApplicationStatus @default(NEW)
+  notes      String?           @db.Text
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+
+  job        Job               @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@index([email])
+}
+
+// ----------------------------------------------------
+// 6. Contact Inquiries / Leads
+// ----------------------------------------------------
+model ContactInquiry {
+  id        String        @id @default(cuid())
+  name      String
+  company   String?
+  email     String
+  phone     String?
+  service   String?
+  message   String        @db.Text
+  status    InquiryStatus @default(NEW)
+  notes     String?       @db.Text
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  @@index([email])
+}
+
+// ----------------------------------------------------
+// 7. Blogs & Articles (Footer Linked CMS)
+// ----------------------------------------------------
+model Blog {
+  id            String   @id @default(cuid())
+  title         String
+  slug          String   @unique
+  excerpt       String?  @db.Text
+  content       String   @db.LongText
+  coverImageUrl String?  @db.Text
+  category      String   // "AI & Automation", "Software Development", "Tech Trends"
+  author        String   @default("ITLC Editorial Team")
+  authorRole    String?  @default("Technical Lead")
+  isPublished   Boolean  @default(true)
+  publishedAt   DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([slug])
+  @@index([category])
+}
+
+// ----------------------------------------------------
+// 8. Gallery & Showcase
+// ----------------------------------------------------
+model GalleryItem {
+  id        String   @id @default(cuid())
+  title     String
+  imageUrl  String   @db.Text
+  category  String   // "Events", "Office", "Team", "Projects"
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([category])
+}
+
+model PortfolioItem {
+  id          String   @id @default(cuid())
+  title       String
+  category    String
+  client      String?
+  description String   @db.Text
+  imageUrl    String   @db.Text
+  tags        String   // Comma separated tags e.g. "Government, AI, Portal"
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ----------------------------------------------------
+// 9. Testimonials & Client Trust
+// ----------------------------------------------------
+model Testimonial {
+  id          String   @id @default(cuid())
+  clientName  String
+  company     String
+  role        String?
+  review      String   @db.Text
+  rating      Int      @default(5)
+  avatarUrl   String?  @db.Text
+  logoUrl     String?  @db.Text
+  isFeatured  Boolean  @default(true)
+  createdAt   DateTime @default(now())
+}
