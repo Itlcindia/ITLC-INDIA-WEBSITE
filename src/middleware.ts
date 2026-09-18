@@ -1,6 +1,6 @@
-import { NextResponse } from 'next/server.js';
-import type { NextRequest } from 'next/server.js';
-import { jwtVerify } from 'jose';
+import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
+import { jwtVerify } from 'jose/jwt/verify';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'itlc-secret-jwt-key-2026-production-ready';
 const SECRET_KEY = new TextEncoder().encode(JWT_SECRET);
