@@ -12,7 +12,6 @@ export async function GET(request: Request) {
   const q = searchParams.get("q")?.trim() || "";
   const category = searchParams.get("category")?.trim() || "";
 
-  // Fast DB check with 400ms timeout
   try {
     const where: any = {};
     if (category && category !== "ALL") {
@@ -26,24 +25,19 @@ export async function GET(request: Request) {
       ];
     }
 
-    const dbPromise = prisma.blog.findMany({
+    const blogs = await prisma.blog.findMany({
       where,
       orderBy: { createdAt: "desc" },
     });
 
-    const timeoutPromise = new Promise<null>((_, reject) =>
-      setTimeout(() => reject(new Error("DB_TIMEOUT")), 400)
-    );
-
-    const blogs = await Promise.race([dbPromise, timeoutPromise]);
     if (blogs && blogs.length > 0) {
       return NextResponse.json({ success: true, blogs });
     }
-  } catch {
-    // Database offline or timed out
+  } catch (error) {
+    console.warn("Prisma blog fetch failed, falling back to localStore:", error);
   }
 
-  // Instant fallback from localStore (0ms)
+  // Instant fallback from localStore if database is empty
   const blogs = localStore.getBlogs(category, q);
   return NextResponse.json({ success: true, blogs });
 }
@@ -92,25 +86,15 @@ export async function POST(request: Request) {
       data.slug?.replace(/[^a-z0-9]+/g, "-") ||
       data.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 60);
 
-    const newBlog = localStore.addBlog({
-      title: data.title,
-      slug: cleanSlug,
-      category: data.category || "AI & Automation",
-      excerpt: data.excerpt || "Enterprise IT & Technology article from ITLC India.",
-      content: data.content,
-      coverImageUrl: coverImageUrl || "https://images.unsplash.com/photo-1518770660439-4636190af475?q=80&w=1200&auto=format&fit=crop",
-      author: data.author || "ITLC Editorial Team",
-      authorRole: data.authorRole || "Technical Lead",
-      isPublished: Boolean(data.isPublished),
-      publishedAt: new Date().toISOString(),
-    });
+    let savedBlog: any = null;
 
+    // Primary: Save directly to MySQL database
     try {
-      await prisma.blog.create({
+      savedBlog = await prisma.blog.create({
         data: {
           title: data.title,
           slug: cleanSlug,
-          category: data.category,
+          category: data.category || "AI & Automation",
           excerpt: data.excerpt || null,
           content: data.content,
           coverImageUrl: coverImageUrl || "https://images.unsplash.com/photo-1518770660439-4636190af475?q=80&w=1200&auto=format&fit=crop",
@@ -120,18 +104,47 @@ export async function POST(request: Request) {
           publishedAt: new Date(),
         },
       });
-    } catch {
-      // Offline fallback
+    } catch (dbError) {
+      console.error("Prisma blog creation error:", dbError);
     }
 
-    // Invalidate public blog cache
-    await cacheDelete("blogs:published::");
-    await cacheDelete(`blog:detail:${cleanSlug}`);
+    if (!savedBlog) {
+      savedBlog = localStore.addBlog({
+        title: data.title,
+        slug: cleanSlug,
+        category: data.category || "AI & Automation",
+        excerpt: data.excerpt || "Enterprise IT & Technology article from ITLC India.",
+        content: data.content,
+        coverImageUrl: coverImageUrl || "https://images.unsplash.com/photo-1518770660439-4636190af475?q=80&w=1200&auto=format&fit=crop",
+        author: data.author || "ITLC Editorial Team",
+        authorRole: data.authorRole || "Technical Lead",
+        isPublished: Boolean(data.isPublished),
+        publishedAt: new Date().toISOString(),
+      });
+    } else {
+      localStore.addBlog({
+        id: savedBlog.id,
+        title: savedBlog.title,
+        slug: savedBlog.slug,
+        category: savedBlog.category,
+        excerpt: savedBlog.excerpt || "",
+        content: savedBlog.content,
+        coverImageUrl: savedBlog.coverImageUrl || "",
+        author: savedBlog.author,
+        authorRole: savedBlog.authorRole || "",
+        isPublished: savedBlog.isPublished,
+        publishedAt: savedBlog.publishedAt?.toISOString() || new Date().toISOString(),
+      });
+    }
+
+    // Invalidate public blog cache so changes appear immediately
+    await cacheDelete("blogs:published::").catch(() => {});
+    await cacheDelete(`blog:detail:${cleanSlug}`).catch(() => {});
 
     return NextResponse.json({
       success: true,
       message: "Blog article published successfully",
-      blog: newBlog,
+      blog: savedBlog,
     });
   } catch (error: any) {
     console.error("Admin create blog error:", error);

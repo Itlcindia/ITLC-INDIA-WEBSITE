@@ -20,22 +20,15 @@ export async function GET(request: Request) {
       ];
     }
 
-    const dbPromise = prisma.jobApplication.findMany({
+    const applications = await prisma.jobApplication.findMany({
       where,
       include: { job: { select: { title: true, department: true } } },
       orderBy: { createdAt: "desc" },
     });
 
-    const timeoutPromise = new Promise<null>((_, reject) =>
-      setTimeout(() => reject(new Error("DB_TIMEOUT")), 500)
-    );
-
-    const applications = await Promise.race([dbPromise, timeoutPromise]);
-    if (applications && applications.length > 0) {
-      return NextResponse.json({ success: true, applications });
-    }
-  } catch {
-    // Database offline or timed out
+    return NextResponse.json({ success: true, applications });
+  } catch (error) {
+    console.warn("Notice: Prisma job applications query failed, using localStore fallback:", error);
   }
 
   // Instant fallback from localStore

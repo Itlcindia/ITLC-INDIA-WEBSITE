@@ -44,21 +44,16 @@ export async function GET(request: Request) {
 
   try {
     const whereClause = status && status !== "all" ? { status: status as any } : undefined;
-    const dbPromise = prisma.job.findMany({
+    const jobs = await prisma.job.findMany({
       where: whereClause,
       orderBy: { createdAt: "desc" },
-    }).catch(() => null);
+    });
 
-    const timeoutPromise = new Promise<null>((_, reject) =>
-      setTimeout(() => reject(new Error("DB_TIMEOUT")), 500)
-    );
-
-    const jobs = await Promise.race([dbPromise, timeoutPromise]);
     if (jobs && jobs.length > 0) {
       return NextResponse.json({ success: true, jobs });
     }
-  } catch {
-    // Database offline or timed out
+  } catch (error) {
+    console.warn("Notice: Prisma job query failed, using localStore fallback:", error);
   }
 
   // Instant fallback from localStore
@@ -76,22 +71,11 @@ export async function POST(request: Request) {
       );
     }
 
-    // Always persist to localStore immediately
-    const newJob = localStore.addJob({
-      title: body.title.trim(),
-      department: body.department.trim(),
-      location: body.location.trim(),
-      type: body.type?.trim() || "Full-time",
-      experience: body.experience?.trim() || "1-3 Years",
-      salary: body.salary?.trim() || "Best in Industry",
-      description: body.description?.trim() || "",
-      requirements: body.requirements?.trim() || "",
-      status: body.status === "CLOSED" ? "CLOSED" : "ACTIVE",
-    });
+    let savedJob: any = null;
 
-    // Try persisting to Prisma if online
+    // Primary: Persist directly to Prisma MySQL database
     try {
-      await prisma.job.create({
+      savedJob = await prisma.job.create({
         data: {
           title: body.title.trim(),
           department: body.department.trim(),
@@ -104,14 +88,41 @@ export async function POST(request: Request) {
           status: body.status === "CLOSED" ? "CLOSED" : "ACTIVE",
         },
       });
-    } catch {
-      // Database optional fallback
+    } catch (dbErr) {
+      console.error("Prisma job creation error:", dbErr);
+    }
+
+    if (!savedJob) {
+      savedJob = localStore.addJob({
+        title: body.title.trim(),
+        department: body.department.trim(),
+        location: body.location.trim(),
+        type: body.type?.trim() || "Full-time",
+        experience: body.experience?.trim() || "1-3 Years",
+        salary: body.salary?.trim() || "Best in Industry",
+        description: body.description?.trim() || "",
+        requirements: body.requirements?.trim() || "",
+        status: body.status === "CLOSED" ? "CLOSED" : "ACTIVE",
+      });
+    } else {
+      localStore.addJob({
+        id: savedJob.id,
+        title: savedJob.title,
+        department: savedJob.department,
+        location: savedJob.location,
+        type: savedJob.type,
+        experience: savedJob.experience || "1-3 Years",
+        salary: savedJob.salary || "Best in Industry",
+        description: savedJob.description,
+        requirements: savedJob.requirements || "",
+        status: savedJob.status,
+      });
     }
 
     return NextResponse.json({
       success: true,
       message: "Job opening posted successfully",
-      job: newJob,
+      job: savedJob,
     });
   } catch (error: any) {
     console.error("Create job error:", error);

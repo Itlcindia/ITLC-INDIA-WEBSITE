@@ -25,8 +25,8 @@ export async function POST(request: Request) {
 
     // Find corresponding job or fallback
     let jobTitle = position;
-    let jobDept = "Engineering";
-    let jobId = "job_general";
+    let jobDept = "General Application";
+    let jobId: string | null = null;
 
     try {
       const dbJob = await prisma.job.findFirst({
@@ -46,22 +46,42 @@ export async function POST(request: Request) {
       // Database query optional
     }
 
-    // Save resume file locally
+    // Save resume file (now returns Base64 data URL for permanent MySQL persistence)
     let resumeUrl = "";
     const resumeFile = formData.get("resume");
     if (resumeFile instanceof File && resumeFile.size > 0) {
       try {
         resumeUrl = await saveUploadedFile(resumeFile, "careers/resumes");
       } catch (err) {
-        console.warn("Resume local save error:", err);
+        console.warn("Resume save error:", err);
       }
     } else {
       resumeUrl = String(formData.get("resumeUrl") || "").trim();
     }
 
-    // Save to localStore (guarantees immediate visibility in Admin Panel at /admin/careers)
+    let savedApp: any = null;
+
+    // Primary: Persist directly to Prisma MySQL database
+    try {
+      savedApp = await prisma.jobApplication.create({
+        data: {
+          jobId: jobId || null,
+          fullName,
+          email,
+          phone: phone || null,
+          message: message || null,
+          resumeUrl: resumeUrl || "No resume uploaded",
+          status: "NEW",
+        },
+      });
+    } catch (dbErr) {
+      console.error("Prisma job application create error:", dbErr);
+    }
+
+    // Sync to localStore
     const localApp = localStore.addApplication({
-      jobId,
+      id: savedApp?.id,
+      jobId: jobId || "job_general",
       fullName,
       email,
       phone: phone || "",
@@ -74,23 +94,6 @@ export async function POST(request: Request) {
         department: jobDept,
       },
     });
-
-    // Also persist to Prisma if database is online
-    try {
-      await prisma.jobApplication.create({
-        data: {
-          jobId,
-          fullName,
-          email,
-          phone: phone || null,
-          message: message || null,
-          resumeUrl: resumeUrl || "No resume uploaded",
-          status: "NEW",
-        },
-      });
-    } catch {
-      // Database optional fallback
-    }
 
     // Optional background sync to existing Google App Script
     try {

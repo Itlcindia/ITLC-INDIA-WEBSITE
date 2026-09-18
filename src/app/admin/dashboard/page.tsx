@@ -1,6 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
-import { prisma, isDbCircuitBroken, markDbOffline } from '@/lib/prisma';
+import { prisma } from '@/lib/prisma';
 import { getSessionUser } from '@/lib/auth';
 import { localStore } from '@/lib/local-store';
 import { 
@@ -34,60 +34,48 @@ export default async function AdminDashboardPage() {
   let recentStudents: any[] = localData.recentStudents;
   let recentCertificates: any[] = localData.recentCertificates;
 
-  if (!isDbCircuitBroken()) {
-    try {
-      const probePromise = prisma.certificate.count();
-      const timeoutPromise = new Promise<number>((_, reject) =>
-        setTimeout(() => reject(new Error('DB_TIMEOUT')), 300)
-      );
-      const dbTotalCert = await Promise.race([probePromise, timeoutPromise]);
-      if (typeof dbTotalCert === 'number' && dbTotalCert > 0) {
-        const [
-          totalCert,
-          verifiedCert,
-          pendingStud,
-          totalStud,
-          inquiries,
-          jobs,
-          apps,
-          blogs,
-          products,
-          studentsList,
-          certsList
-        ] = await Promise.all([
-          prisma.certificate.count().catch(() => stats.totalCertificates),
-          prisma.certificate.count({ where: { status: 'VERIFIED' } }).catch(() => stats.verifiedCertificates),
-          prisma.studentRegistration.count({ where: { status: 'PENDING' } }).catch(() => stats.pendingStudents),
-          prisma.studentRegistration.count({ where: { status: 'APPROVED' } }).catch(() => stats.totalStudents),
-          prisma.contactInquiry.count({ where: { status: 'NEW' } }).catch(() => stats.newInquiries),
-          prisma.job.count({ where: { status: 'ACTIVE' } }).catch(() => stats.activeJobs),
-          prisma.jobApplication.count().catch(() => stats.totalApplications),
-          prisma.blog.count({ where: { isPublished: true } }).catch(() => stats.publishedBlogs),
-          prisma.product.count().catch(() => stats.totalProducts),
-          prisma.studentRegistration.findMany({ take: 5, orderBy: { createdAt: 'desc' } }).catch(() => recentStudents),
-          prisma.certificate.findMany({ take: 5, orderBy: { createdAt: 'desc' } }).catch(() => recentCertificates),
-        ]);
+  try {
+    const [
+      totalCert,
+      verifiedCert,
+      pendingStud,
+      totalStud,
+      inquiries,
+      jobs,
+      apps,
+      blogs,
+      products,
+      studentsList,
+      certsList
+    ] = await Promise.all([
+      prisma.certificate.count().catch(() => stats.totalCertificates),
+      prisma.certificate.count({ where: { status: 'VERIFIED' } }).catch(() => stats.verifiedCertificates),
+      prisma.studentRegistration.count({ where: { status: 'PENDING' } }).catch(() => stats.pendingStudents),
+      prisma.studentRegistration.count({ where: { status: 'APPROVED' } }).catch(() => stats.totalStudents),
+      prisma.contactInquiry.count({ where: { status: 'NEW' } }).catch(() => stats.newInquiries),
+      prisma.job.count({ where: { status: 'ACTIVE' } }).catch(() => stats.activeJobs),
+      prisma.jobApplication.count().catch(() => stats.totalApplications),
+      prisma.blog.count({ where: { isPublished: true } }).catch(() => stats.publishedBlogs),
+      prisma.product.count().catch(() => stats.totalProducts),
+      prisma.studentRegistration.findMany({ take: 5, orderBy: { createdAt: 'desc' } }).catch(() => recentStudents),
+      prisma.certificate.findMany({ take: 5, orderBy: { createdAt: 'desc' } }).catch(() => recentCertificates),
+    ]);
 
-        stats = {
-          totalCertificates: totalCert,
-          verifiedCertificates: verifiedCert,
-          pendingStudents: pendingStud,
-          totalStudents: totalStud,
-          newInquiries: inquiries,
-          activeJobs: jobs,
-          totalApplications: apps,
-          publishedBlogs: blogs,
-          totalProducts: products,
-        };
-        recentStudents = studentsList;
-        recentCertificates = certsList;
-      } else {
-        markDbOffline();
-      }
-    } catch {
-      markDbOffline();
-      // Database offline - seamlessly render real localData in 0ms!
-    }
+    stats = {
+      totalCertificates: totalCert,
+      verifiedCertificates: verifiedCert,
+      pendingStudents: pendingStud,
+      totalStudents: totalStud,
+      newInquiries: inquiries,
+      activeJobs: jobs,
+      totalApplications: apps,
+      publishedBlogs: blogs,
+      totalProducts: products,
+    };
+    if (studentsList && studentsList.length > 0) recentStudents = studentsList;
+    if (certsList && certsList.length > 0) recentCertificates = certsList;
+  } catch (error) {
+    console.warn("Notice: Dashboard metric fetch used local store fallback:", error);
   }
 
   return (

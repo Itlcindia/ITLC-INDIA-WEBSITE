@@ -56,7 +56,7 @@ model User {
   password     String
   role         UserRole      @default(STAFF)
   phone        String?
-  avatar       String?
+  avatar       String?       @db.LongText
   status       String        @default("ACTIVE") // ACTIVE, SUSPENDED
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
@@ -88,7 +88,7 @@ model Certificate {
   expiryDate         String?
   dateOfBirth        String?           // For DOB security authentication before download
   verificationId     String?
-  certificateFileUrl String?           @db.Text
+  certificateFileUrl String?           @db.LongText
   status             CertificateStatus @default(VERIFIED)
   revokedReason      String?
   createdAt          DateTime          @default(now())
@@ -119,10 +119,10 @@ model StudentRegistration {
   city               String
   state              String
   pincode            String
-  passportPhotoUrl   String?       @db.Text
-  resumeUrl          String?       @db.Text
-  aadhaarCardUrl     String?       @db.Text
-  collegeIdCardUrl   String?       @db.Text
+  passportPhotoUrl   String?       @db.LongText
+  resumeUrl          String?       @db.LongText
+  aadhaarCardUrl     String?       @db.LongText
+  collegeIdCardUrl   String?       @db.LongText
   status             StudentStatus @default(PENDING)
   notes              String?       @db.Text
   createdAt          DateTime      @default(now())
@@ -178,18 +178,18 @@ model Job {
 
 model JobApplication {
   id         String            @id @default(cuid())
-  jobId      String
+  jobId      String?
   fullName   String
   email      String
   phone      String?
   message    String?           @db.Text
-  resumeUrl  String            @db.Text
+  resumeUrl  String            @db.LongText
   status     ApplicationStatus @default(NEW)
   notes      String?           @db.Text
   createdAt  DateTime          @default(now())
   updatedAt  DateTime          @updatedAt
 
-  job        Job               @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  job        Job?              @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
   @@index([jobId])
   @@index([email])
@@ -223,7 +223,7 @@ model Blog {
   slug          String   @unique
   excerpt       String?  @db.Text
   content       String   @db.LongText
-  coverImageUrl String?  @db.Text
+  coverImageUrl String?  @db.LongText
   category      String   // "AI & Automation", "Software Development", "Tech Trends"
   author        String   @default("ITLC Editorial Team")
   authorRole    String?  @default("Technical Lead")
@@ -242,7 +242,7 @@ model Blog {
 model GalleryItem {
   id        String   @id @default(cuid())
   title     String
-  imageUrl  String   @db.Text
+  imageUrl  String   @db.LongText
   category  String   // "Events", "Office", "Team", "Projects"
   sortOrder Int      @default(0)
   createdAt DateTime @default(now())
@@ -256,7 +256,7 @@ model PortfolioItem {
   category    String
   client      String?
   description String   @db.Text
-  imageUrl    String   @db.Text
+  imageUrl    String   @db.LongText
   tags        String   // Comma separated tags e.g. "Government, AI, Portal"
   sortOrder   Int      @default(0)
   createdAt   DateTime @default(now())
@@ -273,8 +273,8 @@ model Testimonial {
   role        String?
   review      String   @db.Text
   rating      Int      @default(5)
-  avatarUrl   String?  @db.Text
-  logoUrl     String?  @db.Text
+  avatarUrl   String?  @db.LongText
+  logoUrl     String?  @db.LongText
   isFeatured  Boolean  @default(true)
   createdAt   DateTime @default(now())
 }

@@ -31,7 +31,7 @@ export async function GET(request: Request) {
       where.status = status;
     }
 
-    const dbPromise = Promise.all([
+    const [certificates, total] = await Promise.all([
       prisma.certificate.findMany({
         where,
         orderBy: { createdAt: "desc" },
@@ -41,26 +41,18 @@ export async function GET(request: Request) {
       prisma.certificate.count({ where }),
     ]);
 
-    const timeoutPromise = new Promise<null>((_, reject) =>
-      setTimeout(() => reject(new Error("DB_TIMEOUT")), 400)
-    );
-
-    const result = await Promise.race([dbPromise, timeoutPromise]);
-    if (result) {
-      const [certificates, total] = result;
-      return NextResponse.json({
-        success: true,
-        certificates,
-        pagination: {
-          total,
-          page,
-          limit,
-          totalPages: Math.ceil(total / limit),
-        },
-      });
-    }
-  } catch {
-    // Database offline or timed out
+    return NextResponse.json({
+      success: true,
+      certificates,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit) || 1,
+      },
+    });
+  } catch (error) {
+    console.warn("Notice: Prisma certificate query failed, using localStore fallback:", error);
   }
 
   // Instant fallback from localStore (0ms)

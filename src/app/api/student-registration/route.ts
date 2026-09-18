@@ -67,34 +67,11 @@ export async function POST(request: Request) {
     const randomDigits = Math.floor(100000 + Math.random() * 900000);
     const applicationNumber = `ITLC-${currentYear}-${randomDigits}`;
 
-    // Always persist to localStore for instant local admin visibility
-    const localStudent = localStore.addStudent({
-      applicationNumber,
-      fullName,
-      fatherName: fatherName || "N/A",
-      email,
-      mobileNumber,
-      whatsappNumber: whatsappNumber || mobileNumber,
-      dob: dob || "N/A",
-      gender: gender || "N/A",
-      collegeName: collegeName || "N/A",
-      courseApplied: courseApplied || "General",
-      qualification: qualification || "N/A",
-      yearSemester: yearSemester || "N/A",
-      address: address || "N/A",
-      city: city || "N/A",
-      state: state || "N/A",
-      pincode: pincode || "000000",
-      passportPhotoUrl: passportPhotoUrl || undefined,
-      resumeUrl: resumeUrl || undefined,
-      aadhaarCardUrl: aadhaarCardUrl || undefined,
-      collegeIdCardUrl: collegeIdCardUrl || undefined,
-      status: "PENDING",
-    });
+    let savedStudent: any = null;
 
-    // Optionally save to Prisma MySQL if running
+    // Primary: Save directly to MySQL database
     try {
-      await prisma.studentRegistration.create({
+      savedStudent = await prisma.studentRegistration.create({
         data: {
           applicationNumber,
           fullName,
@@ -119,16 +96,42 @@ export async function POST(request: Request) {
           status: "PENDING",
         },
       });
-    } catch {
-      // Prisma offline, localStore is already persisted
+    } catch (dbErr) {
+      console.error("Prisma student registration create error:", dbErr);
     }
+
+    // Sync to localStore for backup
+    const localStudent = localStore.addStudent({
+      id: savedStudent?.id,
+      applicationNumber,
+      fullName,
+      fatherName: fatherName || "N/A",
+      email,
+      mobileNumber,
+      whatsappNumber: whatsappNumber || mobileNumber,
+      dob: dob || "N/A",
+      gender: gender || "N/A",
+      collegeName: collegeName || "N/A",
+      courseApplied: courseApplied || "General",
+      qualification: qualification || "N/A",
+      yearSemester: yearSemester || "N/A",
+      address: address || "N/A",
+      city: city || "N/A",
+      state: state || "N/A",
+      pincode: pincode || "000000",
+      passportPhotoUrl: passportPhotoUrl || undefined,
+      resumeUrl: resumeUrl || undefined,
+      aadhaarCardUrl: aadhaarCardUrl || undefined,
+      collegeIdCardUrl: collegeIdCardUrl || undefined,
+      status: "PENDING",
+    });
 
     return NextResponse.json({
       success: true,
       application_id: applicationNumber,
       message: "Application submitted successfully! Your application ID is " + applicationNumber,
       data: {
-        id: localStudent.id,
+        id: savedStudent?.id || localStudent.id,
         applicationNumber,
       },
     });

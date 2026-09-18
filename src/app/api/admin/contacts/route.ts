@@ -22,21 +22,14 @@ export async function GET(request: Request) {
       ];
     }
 
-    const dbPromise = prisma.contactInquiry.findMany({
+    const contacts = await prisma.contactInquiry.findMany({
       where,
       orderBy: { createdAt: "desc" },
     });
 
-    const timeoutPromise = new Promise<null>((_, reject) =>
-      setTimeout(() => reject(new Error("DB_TIMEOUT")), 400)
-    );
-
-    const contacts = await Promise.race([dbPromise, timeoutPromise]);
-    if (contacts && contacts.length > 0) {
-      return NextResponse.json({ success: true, contacts });
-    }
-  } catch {
-    // Database offline or timed out
+    return NextResponse.json({ success: true, contacts });
+  } catch (error) {
+    console.warn("Notice: Prisma contacts query failed, using localStore fallback:", error);
   }
 
   // Instant response from localStore

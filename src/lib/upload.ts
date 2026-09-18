@@ -2,10 +2,12 @@ import path from "path";
 import fs from "fs/promises";
 
 /**
- * Utility to save an uploaded file (from FormData) into the public/uploads directory.
- * @param file The File object from request.formData()
- * @param subfolder Subfolder inside public/uploads (e.g., 'certificates', 'students')
- * @returns Public URL path string (e.g., '/uploads/certificates/1234_cert.pdf')
+ * Utility to process an uploaded file.
+ * Returns a Base64 Data URL for direct storage in the MySQL database (LONGTEXT).
+ * This guarantees:
+ * 1. Images render immediately in Next.js without 404 or broken image icons.
+ * 2. Media persists in MySQL across Git pushes and Hostinger redeployments.
+ * 3. Also attempts to write to public/uploads on disk for backward compatibility.
  */
 export async function saveUploadedFile(
   file: File,
@@ -15,22 +17,39 @@ export async function saveUploadedFile(
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);
 
-    const ext = path.extname(file.name) || ".bin";
+    const ext = path.extname(file.name || "").toLowerCase() || ".jpg";
     const cleanBase = path
-      .basename(file.name, ext)
+      .basename(file.name || "upload", ext)
       .replace(/[^a-zA-Z0-9_-]/g, "_")
       .slice(0, 40);
     const filename = `${Date.now()}_${Math.random().toString(36).substring(2, 7)}_${cleanBase}${ext}`;
 
-    const targetDir = path.join(process.cwd(), "public", "uploads", subfolder);
-    await fs.mkdir(targetDir, { recursive: true });
+    // Attempt writing to disk for local file serving if possible
+    try {
+      const targetDir = path.join(process.cwd(), "public", "uploads", subfolder);
+      await fs.mkdir(targetDir, { recursive: true });
+      const targetPath = path.join(targetDir, filename);
+      await fs.writeFile(targetPath, buffer);
+    } catch (diskErr) {
+      console.warn("Notice: Ephemeral filesystem detected, writing to disk skipped:", diskErr);
+    }
 
-    const targetPath = path.join(targetDir, filename);
-    await fs.writeFile(targetPath, buffer);
+    // Determine MIME type
+    let mimeType = file.type;
+    if (!mimeType || mimeType === "application/octet-stream") {
+      if (ext === ".jpg" || ext === ".jpeg") mimeType = "image/jpeg";
+      else if (ext === ".png") mimeType = "image/png";
+      else if (ext === ".webp") mimeType = "image/webp";
+      else if (ext === ".gif") mimeType = "image/gif";
+      else if (ext === ".svg") mimeType = "image/svg+xml";
+      else if (ext === ".pdf") mimeType = "application/pdf";
+      else mimeType = "image/jpeg";
+    }
 
-    return `/uploads/${subfolder}/${filename}`;
+    // Return Data URL for permanent MySQL persistence
+    return `data:${mimeType};base64,${buffer.toString("base64")}`;
   } catch (error) {
-    console.error("Failed to save uploaded file:", error);
+    console.error("Failed to process uploaded file:", error);
     throw new Error("File upload failed on server");
   }
 }

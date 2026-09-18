@@ -20,21 +20,16 @@ export async function GET(request: Request) {
       ];
     }
 
-    const dbPromise = prisma.product.findMany({
+    const products = await prisma.product.findMany({
       where,
       orderBy: { sortOrder: "asc" },
     });
 
-    const timeoutPromise = new Promise<null>((_, reject) =>
-      setTimeout(() => reject(new Error("DB_TIMEOUT")), 400)
-    );
-
-    const products = await Promise.race([dbPromise, timeoutPromise]);
     if (products && products.length > 0) {
       return NextResponse.json({ success: true, products });
     }
-  } catch {
-    // Database offline or timed out
+  } catch (error) {
+    console.warn("Notice: Prisma product fetch failed, using localStore fallback:", error);
   }
 
   // Instant response from localStore
@@ -66,25 +61,11 @@ export async function POST(request: Request) {
       ? body.features
       : JSON.stringify([]);
 
-    // Add to localStore immediately
-    const localProduct = localStore.addProduct({
-      name: body.name.trim(),
-      slug,
-      category: body.category.trim(),
-      tagline: body.tagline?.trim() || "",
-      description: body.description?.trim() || "",
-      icon: body.icon?.trim() || "Layers",
-      features,
-      directLoginUrl: body.directLoginUrl?.trim() || "/api/auth/login",
-      externalWebsiteUrl: body.externalWebsiteUrl?.trim() || null,
-      demoUrl: body.demoUrl?.trim() || "/contact",
-      isLive: body.isLive !== false,
-      sortOrder: Number(body.sortOrder) || 0,
-    });
+    let savedProduct: any = null;
 
-    // Try saving to database asynchronously
+    // Primary: Save directly to MySQL database
     try {
-      await prisma.product.create({
+      savedProduct = await prisma.product.create({
         data: {
           name: body.name.trim(),
           slug,
@@ -100,8 +81,41 @@ export async function POST(request: Request) {
           sortOrder: Number(body.sortOrder) || 0,
         },
       });
-    } catch {
-      // Offline DB fallback
+    } catch (dbErr) {
+      console.error("Prisma create product error:", dbErr);
+    }
+
+    if (!savedProduct) {
+      savedProduct = localStore.addProduct({
+        name: body.name.trim(),
+        slug,
+        category: body.category.trim(),
+        tagline: body.tagline?.trim() || "",
+        description: body.description?.trim() || "",
+        icon: body.icon?.trim() || "Layers",
+        features,
+        directLoginUrl: body.directLoginUrl?.trim() || "/api/auth/login",
+        externalWebsiteUrl: body.externalWebsiteUrl?.trim() || null,
+        demoUrl: body.demoUrl?.trim() || "/contact",
+        isLive: body.isLive !== false,
+        sortOrder: Number(body.sortOrder) || 0,
+      });
+    } else {
+      localStore.addProduct({
+        id: savedProduct.id,
+        name: savedProduct.name,
+        slug: savedProduct.slug,
+        category: savedProduct.category,
+        tagline: savedProduct.tagline,
+        description: savedProduct.description,
+        icon: savedProduct.icon || "Layers",
+        features: savedProduct.features,
+        directLoginUrl: savedProduct.directLoginUrl || "",
+        externalWebsiteUrl: savedProduct.externalWebsiteUrl,
+        demoUrl: savedProduct.demoUrl || "",
+        isLive: savedProduct.isLive,
+        sortOrder: savedProduct.sortOrder,
+      });
     }
 
     // Invalidate public cache
@@ -110,7 +124,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       success: true,
       message: "Product created successfully",
-      product: localProduct,
+      product: savedProduct,
     });
   } catch (error: any) {
     console.error("Admin create product error:", error);

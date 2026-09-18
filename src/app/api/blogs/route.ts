@@ -123,26 +123,21 @@ export async function GET(request: Request) {
       ];
     }
 
-    const dbPromise = prisma.blog.findMany({
+    const blogs = await prisma.blog.findMany({
       where,
       orderBy: { publishedAt: "desc" },
     });
 
-    const timeoutPromise = new Promise<null>((_, reject) =>
-      setTimeout(() => reject(new Error("DB_TIMEOUT")), 400)
-    );
-
-    const blogs = await Promise.race([dbPromise, timeoutPromise]);
     if (blogs && blogs.length > 0) {
-      await cacheSet(cacheKey, blogs, 600);
+      await cacheSet(cacheKey, blogs, 600).catch(() => {});
       return NextResponse.json({ success: true, blogs, source: "database" });
     }
-  } catch {
-    // Database offline or timed out - seamlessly serve localStore
+  } catch (error) {
+    console.warn("Notice: Public blogs Prisma query failed, using localStore:", error);
   }
 
   // Instant response from localStore (0ms)
   const blogs = localStore.getBlogs(category, q);
-  await cacheSet(cacheKey, blogs, 600);
+  await cacheSet(cacheKey, blogs, 600).catch(() => {});
   return NextResponse.json({ success: true, blogs, source: "localStore" });
 }

@@ -92,7 +92,7 @@ export async function GET(request: Request) {
       });
     }
 
-    const dbPromise = Promise.all([
+    const [students, total] = await Promise.all([
       prisma.studentRegistration.findMany({
         where,
         orderBy: { createdAt: "desc" },
@@ -102,26 +102,18 @@ export async function GET(request: Request) {
       prisma.studentRegistration.count({ where }),
     ]);
 
-    const timeoutPromise = new Promise<null>((_, reject) =>
-      setTimeout(() => reject(new Error("DB_TIMEOUT")), 500)
-    );
-
-    const result = await Promise.race([dbPromise, timeoutPromise]);
-    if (result) {
-      const [students, total] = result;
-      return NextResponse.json({
-        success: true,
-        students,
-        pagination: {
-          total,
-          page,
-          limit,
-          totalPages: Math.ceil(total / limit),
-        },
-      });
-    }
-  } catch {
-    // Database offline or timed out - seamlessly serve from localStore
+    return NextResponse.json({
+      success: true,
+      students,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit) || 1,
+      },
+    });
+  } catch (error) {
+    console.warn("Notice: Prisma student query failed, using localStore fallback:", error);
   }
 
   // Instant Fallback from localStore

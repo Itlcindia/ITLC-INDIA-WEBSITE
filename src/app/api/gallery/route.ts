@@ -7,32 +7,25 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const category = searchParams.get("category")?.trim() || "";
 
-  // Attempt database query with fast 500ms timeout, falling back directly to local store with all 54 real images
   try {
     const where: any = {};
     if (category && category !== "ALL") {
       where.category = category;
     }
 
-    // Fast race between DB and 500ms timeout
-    const dbPromise = prisma.galleryItem.findMany({
+    const items = await prisma.galleryItem.findMany({
       where,
       orderBy: { sortOrder: "asc" },
-    }).catch(() => null);
+    });
 
-    const timeoutPromise = new Promise<null>((_, reject) =>
-      setTimeout(() => reject(new Error("DB_TIMEOUT")), 500)
-    );
-
-    const items = await Promise.race([dbPromise, timeoutPromise]);
     if (items && items.length > 0) {
       return NextResponse.json({ success: true, items });
     }
-  } catch {
-    // Database offline or timed out - seamlessly serve all 54 real images instantly
+  } catch (error) {
+    console.warn("Gallery DB query failed, falling back to local store:", error);
   }
 
-  // Instant response with all 54 real images
+  // Instant response with fallback images if database has no entries
   const items = localStore.getGallery(category);
   return NextResponse.json({ success: true, items });
 }
@@ -72,17 +65,11 @@ export async function POST(request: Request) {
       );
     }
 
-    // Always add to localStore for instant UI feedback
-    const localItem = localStore.addGalleryItem({
-      title,
-      category,
-      imageUrl,
-      sortOrder,
-    });
+    let savedItem: any = null;
 
-    // Try saving to DB asynchronously if available
+    // Primary: Save directly to MySQL database
     try {
-      await prisma.galleryItem.create({
+      savedItem = await prisma.galleryItem.create({
         data: {
           title,
           category,
@@ -90,14 +77,33 @@ export async function POST(request: Request) {
           sortOrder,
         },
       });
-    } catch {
-      // Offline DB fallback
+    } catch (dbError) {
+      console.error("Prisma gallery create error:", dbError);
+    }
+
+    if (!savedItem) {
+      // Fallback to local store if DB is completely unreachable
+      savedItem = localStore.addGalleryItem({
+        title,
+        category,
+        imageUrl,
+        sortOrder,
+      });
+    } else {
+      // Sync to local store with real database ID
+      localStore.addGalleryItem({
+        id: savedItem.id,
+        title: savedItem.title,
+        category: savedItem.category,
+        imageUrl: savedItem.imageUrl,
+        sortOrder: savedItem.sortOrder,
+      });
     }
 
     return NextResponse.json({
       success: true,
       message: "Photo added to gallery successfully",
-      item: localItem,
+      item: savedItem,
     });
   } catch (error: any) {
     console.error("Add gallery item error:", error);

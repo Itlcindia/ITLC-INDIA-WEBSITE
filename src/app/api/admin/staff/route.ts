@@ -139,10 +139,10 @@ export async function POST(request: Request) {
       user: newUser,
       message: 'New team member account created successfully.',
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Create Staff Error:', error);
     return NextResponse.json(
-      { success: false, error: 'Internal server error while creating team member' },
+      { success: false, error: error?.message || 'Internal server error while creating team member' },
       { status: 500 }
     );
   }

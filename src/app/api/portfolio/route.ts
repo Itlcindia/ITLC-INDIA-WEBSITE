@@ -44,20 +44,15 @@ const DEFAULT_PORTFOLIO = [
 
 export async function GET() {
   try {
-    const dbPromise = prisma.portfolioItem.findMany({
+    const items = await prisma.portfolioItem.findMany({
       orderBy: { sortOrder: "asc" },
-    }).catch(() => null);
+    });
 
-    const timeoutPromise = new Promise<null>((_, reject) =>
-      setTimeout(() => reject(new Error("DB_TIMEOUT")), 500)
-    );
-
-    const items = await Promise.race([dbPromise, timeoutPromise]);
     if (items && items.length > 0) {
       return NextResponse.json({ success: true, items });
     }
-  } catch {
-    // Database offline or timed out
+  } catch (error) {
+    console.warn("Notice: Prisma portfolio query failed, using localStore fallback:", error);
   }
 
   // Instant fallback from localStore
