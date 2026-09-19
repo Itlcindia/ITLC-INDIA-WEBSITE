@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import prisma from "@/lib/prisma";
+import prisma, { isDbCircuitBroken, markDbOffline } from "@/lib/prisma";
 import { saveUploadedFile } from "@/lib/upload";
 import { localStore } from "@/lib/local-store";
 
@@ -28,25 +28,27 @@ export async function POST(request: Request) {
     let jobDept = "General Application";
     let jobId: string | null = null;
 
-    try {
-      const dbJob = await prisma.job.findFirst({
-        where: {
-          OR: [
-            { title: { contains: position } },
-            { id: position },
-          ],
-        },
-      });
-      if (dbJob) {
-        jobId = dbJob.id;
-        jobTitle = dbJob.title;
-        jobDept = dbJob.department;
+    if (!isDbCircuitBroken()) {
+      try {
+        const dbJob = await prisma.job.findFirst({
+          where: {
+            OR: [
+              { title: { contains: position } },
+              { id: position },
+            ],
+          },
+        });
+        if (dbJob) {
+          jobId = dbJob.id;
+          jobTitle = dbJob.title;
+          jobDept = dbJob.department;
+        }
+      } catch (err) {
+        markDbOffline(30000);
       }
-    } catch {
-      // Database query optional
     }
 
-    // Save resume file (now returns Base64 data URL for permanent MySQL persistence)
+    // Save resume file (returns Base64 data URL for permanent MySQL persistence)
     let resumeUrl = "";
     const resumeFile = formData.get("resume");
     if (resumeFile instanceof File && resumeFile.size > 0) {
@@ -61,24 +63,27 @@ export async function POST(request: Request) {
 
     let savedApp: any = null;
 
-    // Primary: Persist directly to Prisma MySQL database
-    try {
-      savedApp = await prisma.jobApplication.create({
-        data: {
-          jobId: jobId || null,
-          fullName,
-          email,
-          phone: phone || null,
-          message: message || null,
-          resumeUrl: resumeUrl || "No resume uploaded",
-          status: "NEW",
-        },
-      });
-    } catch (dbErr) {
-      console.error("Prisma job application create error:", dbErr);
+    // Primary: Persist directly to Prisma MySQL database if connected
+    if (!isDbCircuitBroken()) {
+      try {
+        savedApp = await prisma.jobApplication.create({
+          data: {
+            jobId: jobId || null,
+            fullName,
+            email,
+            phone: phone || null,
+            message: message || null,
+            resumeUrl: resumeUrl || "No resume uploaded",
+            status: "NEW",
+          },
+        });
+      } catch (dbErr) {
+        markDbOffline(30000);
+        console.warn("Notice: Prisma job application save used fallback:", dbErr);
+      }
     }
 
-    // Sync to localStore
+    // Always sync immediately to localStore for instant Admin Panel visibility
     const localApp = localStore.addApplication({
       id: savedApp?.id,
       jobId: jobId || "job_general",

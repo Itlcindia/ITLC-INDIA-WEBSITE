@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
-import prisma from "@/lib/prisma";
+import prisma, { isDbCircuitBroken, markDbOffline } from "@/lib/prisma";
 import { localStore } from "@/lib/local-store";
+
+export const dynamic = "force-dynamic";
 
 const DEFAULT_JOBS = [
   {
@@ -42,21 +44,24 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const status = searchParams.get("status");
 
-  try {
-    const whereClause = status && status !== "all" ? { status: status as any } : undefined;
-    const jobs = await prisma.job.findMany({
-      where: whereClause,
-      orderBy: { createdAt: "desc" },
-    });
+  if (!isDbCircuitBroken()) {
+    try {
+      const whereClause = status && status !== "all" ? { status: status as any } : undefined;
+      const jobs = await prisma.job.findMany({
+        where: whereClause,
+        orderBy: { createdAt: "desc" },
+      });
 
-    if (jobs && jobs.length > 0) {
-      return NextResponse.json({ success: true, jobs });
+      if (jobs && jobs.length > 0) {
+        return NextResponse.json({ success: true, jobs });
+      }
+    } catch (error) {
+      markDbOffline(30000);
+      console.warn("Notice: Prisma job query failed, using localStore fallback:", error);
     }
-  } catch (error) {
-    console.warn("Notice: Prisma job query failed, using localStore fallback:", error);
   }
 
-  // Instant fallback from localStore
+  // Instant fallback from localStore (0ms)
   const jobs = localStore.getJobs(status || undefined);
   return NextResponse.json({ success: true, jobs });
 }

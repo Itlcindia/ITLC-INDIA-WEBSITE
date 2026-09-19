@@ -44,3 +44,7 @@ next-env.d.ts
 firebase-debug.log
 firestore-debug.log
 *.zip
+
+# Persistent runtime data & uploads (prevent git pull from wiping database & images)
+data/*.json
+/public/uploads

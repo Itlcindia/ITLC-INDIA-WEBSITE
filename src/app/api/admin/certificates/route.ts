@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
-import prisma from "@/lib/prisma";
+import prisma, { isDbCircuitBroken, markDbOffline } from "@/lib/prisma";
 import { cacheDelete } from "@/lib/redis";
 import { saveUploadedFile } from "@/lib/upload";
 import { localStore } from "@/lib/local-store";
+
+export const dynamic = "force-dynamic";
 
 /**
  * GET /api/admin/certificates
@@ -16,43 +18,46 @@ export async function GET(request: Request) {
   const limit = parseInt(searchParams.get("limit") || "50", 10);
   const skip = (page - 1) * limit;
 
-  try {
-    const where: any = {};
+  if (!isDbCircuitBroken()) {
+    try {
+      const where: any = {};
 
-    if (q) {
-      where.OR = [
-        { certificateNumber: { contains: q } },
-        { studentName: { contains: q } },
-        { courseName: { contains: q } },
-      ];
+      if (q) {
+        where.OR = [
+          { certificateNumber: { contains: q } },
+          { studentName: { contains: q } },
+          { courseName: { contains: q } },
+        ];
+      }
+
+      if (status && status !== "ALL") {
+        where.status = status;
+      }
+
+      const [certificates, total] = await Promise.all([
+        prisma.certificate.findMany({
+          where,
+          orderBy: { createdAt: "desc" },
+          skip,
+          take: limit,
+        }),
+        prisma.certificate.count({ where }),
+      ]);
+
+      return NextResponse.json({
+        success: true,
+        certificates,
+        pagination: {
+          total,
+          page,
+          limit,
+          totalPages: Math.ceil(total / limit) || 1,
+        },
+      });
+    } catch (error) {
+      markDbOffline(30000);
+      console.warn("Notice: Prisma certificate query failed, using localStore fallback:", error);
     }
-
-    if (status && status !== "ALL") {
-      where.status = status;
-    }
-
-    const [certificates, total] = await Promise.all([
-      prisma.certificate.findMany({
-        where,
-        orderBy: { createdAt: "desc" },
-        skip,
-        take: limit,
-      }),
-      prisma.certificate.count({ where }),
-    ]);
-
-    return NextResponse.json({
-      success: true,
-      certificates,
-      pagination: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit) || 1,
-      },
-    });
-  } catch (error) {
-    console.warn("Notice: Prisma certificate query failed, using localStore fallback:", error);
   }
 
   // Instant fallback from localStore (0ms)

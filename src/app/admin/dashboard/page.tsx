@@ -1,6 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
-import { prisma } from '@/lib/prisma';
+import { prisma, isDbCircuitBroken, markDbOffline } from '@/lib/prisma';
 import { getSessionUser } from '@/lib/auth';
 import { localStore } from '@/lib/local-store';
 import { cacheGet, cacheSet } from '@/lib/redis';
@@ -42,7 +42,7 @@ export default async function AdminDashboardPage() {
     stats = cached.stats;
     recentStudents = cached.recentStudents || recentStudents;
     recentCertificates = cached.recentCertificates || recentCertificates;
-  } else {
+  } else if (!isDbCircuitBroken()) {
     try {
       const [
         totalCert,
@@ -106,6 +106,7 @@ export default async function AdminDashboardPage() {
 
       await cacheSet(cacheKey, { stats, recentStudents, recentCertificates }, 30).catch(() => {});
     } catch (error) {
+      markDbOffline(30000);
       console.warn("Notice: Dashboard metric fetch used local store fallback:", error);
     }
   }

@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
-import prisma from "@/lib/prisma";
+import prisma, { isDbCircuitBroken, markDbOffline } from "@/lib/prisma";
 import { localStore } from "@/lib/local-store";
+
+export const dynamic = "force-dynamic";
 
 /**
  * GET /api/admin/students
@@ -15,9 +17,9 @@ export async function GET(request: Request) {
   const limit = parseInt(searchParams.get("limit") || "50", 10);
   const skip = (page - 1) * limit;
 
-  // Try DB with fast 500ms timeout
-  try {
-    const where: any = {};
+  if (!isDbCircuitBroken()) {
+    try {
+      const where: any = {};
 
     if (q) {
       where.OR = [
@@ -113,8 +115,10 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
+    markDbOffline(30000);
     console.warn("Notice: Prisma student query failed, using localStore fallback:", error);
   }
+}
 
   // Instant Fallback from localStore
   const localStudents = localStore.getStudents(q, status);

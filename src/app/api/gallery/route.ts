@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import prisma from "@/lib/prisma";
+import prisma, { isDbCircuitBroken, markDbOffline } from "@/lib/prisma";
 import { saveUploadedFile } from "@/lib/upload";
 import { localStore } from "@/lib/local-store";
 import { cacheGet, cacheSet, cacheDelete } from "@/lib/redis";
@@ -20,23 +20,26 @@ export async function GET(request: Request) {
   } catch {}
 
   let items: any[] = [];
-  try {
-    const where: any = {};
-    if (category && category !== "ALL") {
-      where.category = category;
-    }
+  if (!isDbCircuitBroken()) {
+    try {
+      const where: any = {};
+      if (category && category !== "ALL") {
+        where.category = category;
+      }
 
-    items = await prisma.galleryItem.findMany({
-      where,
-      orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
-    });
+      items = await prisma.galleryItem.findMany({
+        where,
+        orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
+      });
 
-    if (items && items.length > 0) {
-      await cacheSet(cacheKey, items, 180).catch(() => {});
-      return NextResponse.json({ success: true, items });
+      if (items && items.length > 0) {
+        await cacheSet(cacheKey, items, 180).catch(() => {});
+        return NextResponse.json({ success: true, items });
+      }
+    } catch (error) {
+      markDbOffline(30000);
+      console.warn("Gallery DB query failed, falling back to local store:", error);
     }
-  } catch (error) {
-    console.warn("Gallery DB query failed, falling back to local store:", error);
   }
 
   // Instant response with fallback images if database has no entries
@@ -81,18 +84,21 @@ export async function POST(request: Request) {
 
     let savedItem: any = null;
 
-    // Primary: Save directly to MySQL database
-    try {
-      savedItem = await prisma.galleryItem.create({
-        data: {
-          title,
-          category,
-          imageUrl,
-          sortOrder,
-        },
-      });
-    } catch (dbError) {
-      console.error("Prisma gallery create error:", dbError);
+    // Primary: Save directly to MySQL database if connected
+    if (!isDbCircuitBroken()) {
+      try {
+        savedItem = await prisma.galleryItem.create({
+          data: {
+            title,
+            category,
+            imageUrl,
+            sortOrder,
+          },
+        });
+      } catch (dbError) {
+        markDbOffline(30000);
+        console.error("Prisma gallery create error:", dbError);
+      }
     }
 
     if (!savedItem) {
