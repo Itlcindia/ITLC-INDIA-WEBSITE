@@ -28,13 +28,13 @@ function createPrismaClient(): PrismaClient {
   try {
     const url = new URL(connectionString);
     if (!url.searchParams.has('connectTimeout')) {
-      url.searchParams.set('connectTimeout', '15000');
+      url.searchParams.set('connectTimeout', '5000');
     }
     if (!url.searchParams.has('acquireTimeout')) {
-      url.searchParams.set('acquireTimeout', '15000');
+      url.searchParams.set('acquireTimeout', '5000');
     }
     if (!url.searchParams.has('connectionLimit')) {
-      url.searchParams.set('connectionLimit', '20');
+      url.searchParams.set('connectionLimit', '8');
     }
     connectionString = url.toString();
   } catch {}
@@ -48,6 +48,7 @@ function createPrismaClient(): PrismaClient {
 
 export const prisma = globalForPrisma.prisma ?? createPrismaClient();
 
-if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
+// Always persist instance in globalThis to prevent multiple connection pools
+globalForPrisma.prisma = prisma;
 
 export default prisma;

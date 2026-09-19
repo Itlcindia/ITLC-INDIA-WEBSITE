@@ -871,27 +871,39 @@ class LocalStore {
     }
   }
 
+  private isSaving = false;
+  private savePending = false;
+
   private saveToDisk() {
-    try {
-      const dir = path.dirname(DB_FILE_PATH);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
-      const data = {
-        gallery: this.gallery,
-        portfolio: this.portfolio,
-        jobs: this.jobs,
-        applications: this.applications,
-        students: this.students,
-        certificates: this.certificates,
-        products: this.products,
-        blogs: this.blogs,
-        contacts: this.contacts,
-      };
-      fs.writeFileSync(DB_FILE_PATH, JSON.stringify(data, null, 2), 'utf-8');
-    } catch {
-      // Silent error handling in dev
+    if (this.isSaving) {
+      this.savePending = true;
+      return;
     }
+    this.isSaving = true;
+
+    const dir = path.dirname(DB_FILE_PATH);
+    const data = {
+      gallery: this.gallery,
+      portfolio: this.portfolio,
+      jobs: this.jobs,
+      applications: this.applications,
+      students: this.students,
+      certificates: this.certificates,
+      products: this.products,
+      blogs: this.blogs,
+      contacts: this.contacts,
+    };
+
+    fs.promises.mkdir(dir, { recursive: true })
+      .then(() => fs.promises.writeFile(DB_FILE_PATH, JSON.stringify(data, null, 2), 'utf-8'))
+      .catch(() => {})
+      .finally(() => {
+        this.isSaving = false;
+        if (this.savePending) {
+          this.savePending = false;
+          this.saveToDisk();
+        }
+      });
   }
 
   // Gallery CRUD

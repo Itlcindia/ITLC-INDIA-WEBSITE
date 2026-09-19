@@ -20,14 +20,14 @@ export async function DELETE(
       // Offline fallback
     }
 
-    // Invalidate gallery caches and revalidate pages
+    // Invalidate gallery caches in parallel and revalidate gallery page
     const categories = ["ALL", "Events", "Office", "Team", "Projects"];
-    for (const cat of categories) {
-      await cacheDelete(`gallery:items:${cat}`).catch(() => {});
-    }
+    await Promise.all(
+      categories.map((cat) => cacheDelete(`gallery:items:${cat}`).catch(() => {}))
+    );
+
     try {
       revalidatePath("/gallery");
-      revalidatePath("/");
     } catch {}
 
     return NextResponse.json({

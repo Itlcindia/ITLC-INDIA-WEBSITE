@@ -27,11 +27,8 @@ interface GalleryItem {
   createdAt: string;
 }
 
-// Compress image before upload using HTML5 Canvas
-async function compressImageFile(file: File, maxWidth = 1200, maxHeight = 1200, quality = 0.75): Promise<File> {
-  if (!file.type.startsWith("image/")) return file;
-  if (file.type === "image/svg+xml" || file.type === "image/gif") return file;
-
+// Compress image to Base64 Data URL directly via HTML5 Canvas
+async function compressImageToDataUrl(file: File, maxWidth = 1000, maxHeight = 1000, quality = 0.70): Promise<string> {
   return new Promise((resolve) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -52,34 +49,20 @@ async function compressImageFile(file: File, maxWidth = 1200, maxHeight = 1200, 
         canvas.height = height;
         const ctx = canvas.getContext("2d");
         if (!ctx) {
-          resolve(file);
+          resolve(e.target?.result as string);
           return;
         }
         ctx.fillStyle = "#FFFFFF";
         ctx.fillRect(0, 0, width, height);
         ctx.drawImage(img, 0, 0, width, height);
-
-        canvas.toBlob(
-          (blob) => {
-            if (!blob) {
-              resolve(file);
-              return;
-            }
-            const cleanName = file.name.replace(/\.[^/.]+$/, "") + ".jpg";
-            const compressed = new File([blob], cleanName, {
-              type: "image/jpeg",
-              lastModified: Date.now(),
-            });
-            resolve(compressed);
-          },
-          "image/jpeg",
-          quality
-        );
+        // Generates small, highly-optimized Base64 (~50-80KB) in <20ms
+        const dataUrl = canvas.toDataURL("image/jpeg", quality);
+        resolve(dataUrl);
       };
-      img.onerror = () => resolve(file);
+      img.onerror = () => resolve(e.target?.result as string);
       img.src = e.target?.result as string;
     };
-    reader.onerror = () => resolve(file);
+    reader.onerror = () => resolve("");
     reader.readAsDataURL(file);
   });
 }
@@ -120,12 +103,17 @@ export default function AdminGalleryPage() {
     fetchItems();
   }, [fetchItems]);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] || null;
     setSelectedFile(file);
     if (file) {
-      const url = URL.createObjectURL(file);
-      setPreviewUrl(url);
+      // Pre-compress immediately in background so it is instantly ready when clicking save
+      try {
+        const compressed = await compressImageToDataUrl(file);
+        setPreviewUrl(compressed);
+      } catch {
+        setPreviewUrl(URL.createObjectURL(file));
+      }
     } else {
       setPreviewUrl(null);
     }
@@ -137,30 +125,32 @@ export default function AdminGalleryPage() {
       toast({ title: "Error", description: "Photo title is required.", variant: "destructive" });
       return;
     }
-    if (!selectedFile && !imageUrl) {
+    if (!selectedFile && !imageUrl && !previewUrl) {
       toast({ title: "Error", description: "Please upload an image file or enter an image URL.", variant: "destructive" });
       return;
     }
 
     setSubmitting(true);
-    setStatusText("Optimizing image...");
+    setStatusText("Saving photo...");
     try {
-      let fileToUpload = selectedFile;
-      if (selectedFile) {
-        fileToUpload = await compressImageFile(selectedFile, 1200, 1200, 0.75);
+      let finalImageUrl = imageUrl;
+      if (previewUrl && previewUrl.startsWith("data:image/")) {
+        finalImageUrl = previewUrl;
+      } else if (selectedFile) {
+        setStatusText("Optimizing image...");
+        finalImageUrl = await compressImageToDataUrl(selectedFile);
       }
 
-      setStatusText("Uploading to database...");
-      const formData = new FormData();
-      formData.append("title", title);
-      formData.append("category", category);
-      formData.append("sortOrder", String(sortOrder));
-      formData.append("imageUrl", imageUrl);
-      if (fileToUpload) formData.append("imageFile", fileToUpload);
-
+      setStatusText("Saving to database...");
       const res = await fetch("/api/gallery", {
         method: "POST",
-        body: formData,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title,
+          category,
+          sortOrder,
+          imageUrl: finalImageUrl,
+        }),
       });
       const data = await res.json();
 
@@ -171,6 +161,11 @@ export default function AdminGalleryPage() {
         setImageUrl("");
         setSelectedFile(null);
         setPreviewUrl(null);
+
+        // Optimistic UI update: immediately show new photo in the list
+        if (data.item) {
+          setItems((prev) => [data.item, ...prev]);
+        }
         fetchItems();
       } else {
         toast({ title: "Failed", description: data.error || "Could not add photo", variant: "destructive" });

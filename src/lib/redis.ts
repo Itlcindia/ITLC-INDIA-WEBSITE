@@ -7,34 +7,35 @@ const memoryRateLimits = new Map<string, { count: number; expiresAt: number }>()
 let redisClient: Redis | null = null;
 let isRedisAvailable = false;
 
-try {
-  const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
-  redisClient = new Redis(redisUrl, {
-    lazyConnect: true,
-    maxRetriesPerRequest: 1,
-    retryStrategy(times) {
-      if (times > 2) return null; // stop retrying after 2 attempts
-      return 1000;
-    },
-  });
+// Only initialize Redis if REDIS_URL is explicitly configured in environment
+if (process.env.REDIS_URL && process.env.REDIS_URL.trim() !== "") {
+  try {
+    redisClient = new Redis(process.env.REDIS_URL, {
+      lazyConnect: true,
+      maxRetriesPerRequest: 1,
+      connectTimeout: 2000,
+      retryStrategy() {
+        return null; // do not retry if failed
+      },
+    });
 
-  redisClient.connect().then(() => {
-    isRedisAvailable = true;
-    console.log('[Redis] Connected to Redis cache service.');
-  }).catch(() => {
+    redisClient.connect().then(() => {
+      isRedisAvailable = true;
+      console.log('[Redis] Connected to Redis cache service.');
+    }).catch(() => {
+      isRedisAvailable = false;
+    });
+
+    redisClient.on('error', () => {
+      isRedisAvailable = false;
+    });
+
+    redisClient.on('connect', () => {
+      isRedisAvailable = true;
+    });
+  } catch {
     isRedisAvailable = false;
-    // Silently fall back to in-memory cache
-  });
-
-  redisClient.on('error', () => {
-    isRedisAvailable = false;
-  });
-
-  redisClient.on('connect', () => {
-    isRedisAvailable = true;
-  });
-} catch {
-  isRedisAvailable = false;
+  }
 }
 
 /**
