@@ -27,6 +27,63 @@ interface GalleryItem {
   createdAt: string;
 }
 
+// Compress image before upload using HTML5 Canvas
+async function compressImageFile(file: File, maxWidth = 1200, maxHeight = 1200, quality = 0.75): Promise<File> {
+  if (!file.type.startsWith("image/")) return file;
+  if (file.type === "image/svg+xml" || file.type === "image/gif") return file;
+
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new window.Image();
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > maxWidth || height > maxHeight) {
+          if (width / height > maxWidth / maxHeight) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          } else {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          resolve(file);
+          return;
+        }
+        ctx.fillStyle = "#FFFFFF";
+        ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+
+        canvas.toBlob(
+          (blob) => {
+            if (!blob) {
+              resolve(file);
+              return;
+            }
+            const cleanName = file.name.replace(/\.[^/.]+$/, "") + ".jpg";
+            const compressed = new File([blob], cleanName, {
+              type: "image/jpeg",
+              lastModified: Date.now(),
+            });
+            resolve(compressed);
+          },
+          "image/jpeg",
+          quality
+        );
+      };
+      img.onerror = () => resolve(file);
+      img.src = e.target?.result as string;
+    };
+    reader.onerror = () => resolve(file);
+    reader.readAsDataURL(file);
+  });
+}
+
 export default function AdminGalleryPage() {
   const { toast } = useToast();
   const [items, setItems] = useState<GalleryItem[]>([]);
@@ -36,18 +93,20 @@ export default function AdminGalleryPage() {
   // Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [statusText, setStatusText] = useState("");
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState("Events");
   const [sortOrder, setSortOrder] = useState(0);
   const [imageUrl, setImageUrl] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   const fetchItems = useCallback(async () => {
     setLoading(true);
     try {
       const query = new URLSearchParams();
       if (categoryFilter !== "ALL") query.set("category", categoryFilter);
-      const res = await fetch(`/api/gallery?${query.toString()}`);
+      const res = await fetch(`/api/gallery?${query.toString()}`, { cache: "no-store" });
       const data = await res.json();
       if (data.success) setItems(data.items || []);
     } catch {
@@ -61,21 +120,43 @@ export default function AdminGalleryPage() {
     fetchItems();
   }, [fetchItems]);
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    setSelectedFile(file);
+    if (file) {
+      const url = URL.createObjectURL(file);
+      setPreviewUrl(url);
+    } else {
+      setPreviewUrl(null);
+    }
+  };
+
   const handleAddItem = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title) {
       toast({ title: "Error", description: "Photo title is required.", variant: "destructive" });
       return;
     }
+    if (!selectedFile && !imageUrl) {
+      toast({ title: "Error", description: "Please upload an image file or enter an image URL.", variant: "destructive" });
+      return;
+    }
 
     setSubmitting(true);
+    setStatusText("Optimizing image...");
     try {
+      let fileToUpload = selectedFile;
+      if (selectedFile) {
+        fileToUpload = await compressImageFile(selectedFile, 1200, 1200, 0.75);
+      }
+
+      setStatusText("Uploading to database...");
       const formData = new FormData();
       formData.append("title", title);
       formData.append("category", category);
       formData.append("sortOrder", String(sortOrder));
       formData.append("imageUrl", imageUrl);
-      if (selectedFile) formData.append("imageFile", selectedFile);
+      if (fileToUpload) formData.append("imageFile", fileToUpload);
 
       const res = await fetch("/api/gallery", {
         method: "POST",
@@ -84,19 +165,21 @@ export default function AdminGalleryPage() {
       const data = await res.json();
 
       if (data.success) {
-        toast({ title: "Success", description: "Photo added to gallery!" });
+        toast({ title: "Success", description: "Photo added to gallery successfully!" });
         setIsModalOpen(false);
         setTitle("");
         setImageUrl("");
         setSelectedFile(null);
+        setPreviewUrl(null);
         fetchItems();
       } else {
         toast({ title: "Failed", description: data.error || "Could not add photo", variant: "destructive" });
       }
     } catch {
-      toast({ title: "Error", description: "Upload failed", variant: "destructive" });
+      toast({ title: "Error", description: "Upload failed. Please try again.", variant: "destructive" });
     } finally {
       setSubmitting(false);
+      setStatusText("");
     }
   };
 
@@ -194,7 +277,11 @@ export default function AdminGalleryPage() {
                 <img
                   src={item.imageUrl}
                   alt={item.title}
+                  loading="lazy"
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src = "/logo/lo.png";
+                  }}
                 />
                 <div className="absolute top-3 left-3">
                   <span className="text-[10px] font-bold uppercase tracking-wider bg-white/95 backdrop-blur-md px-2.5 py-0.5 rounded-full shadow-sm text-slate-800">
@@ -224,7 +311,7 @@ export default function AdminGalleryPage() {
       {/* Upload Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in">
-          <div className="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-slate-100 p-6 sm:p-8">
+          <div className="bg-white rounded-3xl max-w-md w-full shadow-2xl border border-slate-100 p-6 sm:p-8 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-4 border-b border-slate-100">
               <h3 className="text-xl font-bold text-slate-900">Add Photo to Gallery</h3>
               <button
@@ -273,9 +360,21 @@ export default function AdminGalleryPage() {
                   <input
                     type="file"
                     accept="image/png,image/jpeg,image/webp"
-                    onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                    onChange={handleFileChange}
                     className="block w-full text-xs text-slate-500 file:mr-3 file:py-2 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer border border-slate-200 rounded-xl p-1"
                   />
+                  {previewUrl && (
+                    <div className="relative w-full h-36 rounded-xl overflow-hidden border border-slate-200 bg-slate-50">
+                      <img
+                        src={previewUrl}
+                        alt="Preview"
+                        className="w-full h-full object-cover"
+                      />
+                      <span className="absolute bottom-1 right-2 text-[10px] bg-black/60 text-white px-2 py-0.5 rounded-md backdrop-blur-sm">
+                        Auto-compressed before save
+                      </span>
+                    </div>
+                  )}
                   <Input
                     value={imageUrl}
                     onChange={(e) => setImageUrl(e.target.value)}
@@ -285,11 +384,19 @@ export default function AdminGalleryPage() {
                 </div>
               </div>
 
+              {statusText && (
+                <div className="p-3 bg-blue-50 border border-blue-100 rounded-xl flex items-center gap-2 text-xs text-blue-700 font-medium">
+                  <Loader2 className="w-4 h-4 animate-spin text-blue-600 shrink-0" />
+                  <span>{statusText}</span>
+                </div>
+              )}
+
               <div className="flex items-center justify-end gap-3 pt-6 border-t border-slate-100">
                 <Button
                   type="button"
                   variant="outline"
                   onClick={() => setIsModalOpen(false)}
+                  disabled={submitting}
                   className="rounded-xl border-slate-200 text-slate-600 h-11"
                 >
                   Cancel
@@ -300,7 +407,7 @@ export default function AdminGalleryPage() {
                   className="rounded-xl bg-blue-600 hover:bg-blue-700 text-white h-11 px-6 font-medium"
                 >
                   {submitting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                  Add Photo
+                  {submitting ? "Saving..." : "Add Photo"}
                 </Button>
               </div>
             </form>

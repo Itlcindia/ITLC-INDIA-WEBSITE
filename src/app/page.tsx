@@ -6,6 +6,7 @@ import CTA from "@/components/landing/cta";
 import Partners from "@/components/landing/partners";
 import Industries from "@/components/landing/industries";
 import Portfolio from "@/components/landing/portfolio";
+import Gallery from "@/components/landing/gallery";
 import About from "@/components/landing/about";
 import AiAutomationHighlight from "@/components/landing/ai-automation-highlight";
 import ConstructionHighlight from "@/components/landing/construction-highlight";
@@ -27,6 +28,7 @@ export default function Home() {
         <About />
         <Industries />
         <Portfolio />
+        <Gallery />
         <Clients />
         <Testimonials />
         <Partners />

@@ -34,7 +34,7 @@ function createPrismaClient(): PrismaClient {
       url.searchParams.set('acquireTimeout', '15000');
     }
     if (!url.searchParams.has('connectionLimit')) {
-      url.searchParams.set('connectionLimit', '10');
+      url.searchParams.set('connectionLimit', '20');
     }
     connectionString = url.toString();
   } catch {}

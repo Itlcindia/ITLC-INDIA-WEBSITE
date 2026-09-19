@@ -2,23 +2,37 @@ import { NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { saveUploadedFile } from "@/lib/upload";
 import { localStore } from "@/lib/local-store";
+import { cacheGet, cacheSet, cacheDelete } from "@/lib/redis";
+import { revalidatePath } from "next/cache";
+
+export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const category = searchParams.get("category")?.trim() || "";
 
+  const cacheKey = `gallery:items:${category || "ALL"}`;
+  try {
+    const cached = await cacheGet<any[]>(cacheKey);
+    if (cached && Array.isArray(cached) && cached.length > 0) {
+      return NextResponse.json({ success: true, items: cached });
+    }
+  } catch {}
+
+  let items: any[] = [];
   try {
     const where: any = {};
     if (category && category !== "ALL") {
       where.category = category;
     }
 
-    const items = await prisma.galleryItem.findMany({
+    items = await prisma.galleryItem.findMany({
       where,
-      orderBy: { sortOrder: "asc" },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
     });
 
     if (items && items.length > 0) {
+      await cacheSet(cacheKey, items, 180).catch(() => {});
       return NextResponse.json({ success: true, items });
     }
   } catch (error) {
@@ -26,7 +40,7 @@ export async function GET(request: Request) {
   }
 
   // Instant response with fallback images if database has no entries
-  const items = localStore.getGallery(category);
+  items = localStore.getGallery(category);
   return NextResponse.json({ success: true, items });
 }
 
@@ -99,6 +113,16 @@ export async function POST(request: Request) {
         sortOrder: savedItem.sortOrder,
       });
     }
+
+    // Invalidate gallery caches and revalidate pages
+    const categories = ["ALL", "Events", "Office", "Team", "Projects"];
+    for (const cat of categories) {
+      await cacheDelete(`gallery:items:${cat}`).catch(() => {});
+    }
+    try {
+      revalidatePath("/gallery");
+      revalidatePath("/");
+    } catch {}
 
     return NextResponse.json({
       success: true,
